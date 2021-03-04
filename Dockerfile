@@ -7,7 +7,6 @@ RUN apt-get -y update
 
 RUN apt-get -y install git
 
-
 RUN npm install opencv-build opencv4nodejs
 
 RUN npm ci
