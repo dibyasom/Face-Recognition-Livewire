@@ -24,9 +24,6 @@ const HOST_URL = `http://localhost:${PORT}`;
 server.listen(PORT);
 console.log(`running on ${HOST_URL}`);
 
-//GedFlag
-var gesFlag = false;
-
 const blue = new cv.Vec(255, 0, 0);
 const green = new cv.Vec(0, 255, 0);
 const red = new cv.Vec(0, 0, 255);
@@ -90,141 +87,148 @@ const loadFaceWeights = async () => {
 };
 
 const createDesc = (faceDescriptor) => {
-  return new faceapi.LabeledFaceDescriptors("JackSparrow", faceDescriptor);
+  return new faceapi.LabeledFaceDescriptors("jack Sparrow", faceDescriptor);
 };
-async function initBlackboard() {
+
+//Load models from disk.
+try {
+  faceapi.nets.ssdMobilenetv1
+    .loadFromDisk(faceRecogModels)
+    .then(faceapi.nets.faceLandmark68Net.loadFromDisk(faceRecogModels))
+    .then(faceapi.nets.faceRecognitionNet.loadFromDisk(faceRecogModels))
+    .then(
+      (optionsSSDMobileNet = new faceapi.SsdMobilenetv1Options({
+        minConfidence: 0.1,
+        maxResults: 1,
+      }))
+    )
+    .catch((err) => console.error(err));
+} catch (err) {
+  console.log(err);
+}
+
+//Initialize tf.
+try {
+  faceapi.tf
+    .setBackend("tensorflow")
+    .then(faceapi.tf.enableProdMode())
+    .then(faceapi.tf.ENV.set("DEBUG", false))
+    .then(faceapi.tf.ready())
+    .then(console.log("Ready!"));
+} catch (err) {
+  console.log(err);
+}
+
+app.get("/", (req, res) => {
+  res.render("bb");
+});
+
+io.on("connection", async (socket) => {
+  //Initialize.
+  try {
+    await initBlackboard(socket);
+  } catch (err) {
+    console.error(err);
+  }
+});
+
+async function initBlackboard(socket) {
   // Loading prev trained weights, if any.
   const faceWeights = await loadFaceWeights();
   console.log("Face weights Loaded");
 
-  //Load models from disk.
-  try {
-    faceapi.nets.ssdMobilenetv1
-      .loadFromDisk(faceRecogModels)
-      .then(faceapi.nets.faceLandmark68Net.loadFromDisk(faceRecogModels))
-      .then(faceapi.nets.faceRecognitionNet.loadFromDisk(faceRecogModels))
-      .then(
-        (optionsSSDMobileNet = new faceapi.SsdMobilenetv1Options({
-          minConfidence: 0.1,
-          maxResults: 1,
-        }))
-      )
-      .catch((err) => console.error(err));
-  } catch (err) {
-    console.log(err);
-  }
-
-  //Initialize tf.
-  try {
-    faceapi.tf
-      .setBackend("tensorflow")
-      .then(faceapi.tf.enableProdMode())
-      .then(faceapi.tf.ENV.set("DEBUG", false))
-      .then(faceapi.tf.ready());
-  } catch (err) {
-    console.log(err);
-  }
   console.log(
     `Version: TensorFlow/JS ${faceapi.tf?.version_core} FaceAPI ${
       faceapi.version.faceapi
     } Backend: ${faceapi.tf?.getBackend()}`
   );
+  // OpenCV way to access camStream from front-end.
+  const FPS = 1;
+  const vCap = new cv.VideoCapture(0);
+  vCap.set(cv.CAP_PROP_FRAME_WIDTH, 320);
+  vCap.set(cv.CAP_PROP_FRAME_HEIGHT, 480);
 
-  app.get("/", (req, res) => {
-    res.render("bb");
+  setInterval(async () => {
+    const frameDisp = vCap.read();
+    const frameDispFlip = frameDisp.flip(1);
 
-    // OpenCV way to access camStream from front-end.
-    const FPS = 30;
-    const vCap = new cv.VideoCapture(0);
-    vCap.set(cv.CAP_PROP_FRAME_WIDTH, 320);
-    vCap.set(cv.CAP_PROP_FRAME_HEIGHT, 480);
+    // Tensorflow needs jpeg encoded image.
+    const imgJpeg = cv.imencode(".jpeg", frameDispFlip);
+    // Convert into tensor.
+    const imgDecoded = await decode(imgJpeg);
+    // Pass through SSD.
+    const imgDesc = await analyse(imgDecoded);
+    imgDecoded.dispose();
+    if (imgDesc) {
+      // Draw bounding rect.
+      const x = imgDesc.alignedRect._box._x,
+        y = imgDesc.alignedRect._box._y,
+        height = imgDesc.alignedRect._box._height,
+        width = imgDesc.alignedRect._box._width;
+      frameDispFlip.drawRectangle(
+        new cv.Point2(x, y),
+        new cv.Point2(x + width, y + height),
+        green,
+        2,
+        1,
+        0
+      );
 
-    setInterval(async () => {
-      const frameDisp = vCap.read();
-      const frameDispFlip = frameDisp.flip(1);
+      /* Create and save labeleDescriptors.*****************************************/
+      // const faceDescriptor = createDesc([imgDesc.descriptor]);
+      // if (faceDescriptor) {
+      //   fs.writeFileSync(
+      //     `./data/${Math.random().toString(36).substring(2, 7)}.json`,
+      //     JSON.stringify(faceDescriptor.toJSON())
+      //   );
+      // }
 
-      // Tensorflow needs jpeg encoded image.
-      const imgJpeg = cv.imencode(".jpeg", frameDispFlip);
-      // Convert into tensor.
-      const imgDecoded = await decode(imgJpeg);
-      // Pass through SSD.
-      const imgDesc = await analyse(imgDecoded);
-      imgDecoded.dispose();
-      if (imgDesc) {
-        // Draw bounding rect.
-        const x = imgDesc.alignedRect._box._x,
-          y = imgDesc.alignedRect._box._y,
-          height = imgDesc.alignedRect._box._height,
-          width = imgDesc.alignedRect._box._width;
-        frameDispFlip.drawRectangle(
-          new cv.Point2(x, y),
-          new cv.Point2(x + width, y + height),
-          green,
-          2,
-          1,
-          0
-        );
+      /* Loads and parse the face weights ******************************************/
+      const labels = ["JackSparrow", "Dibyasom"];
+      const labeledFaceWeights = {
+        JackSparrow: faceWeights[0],
+        Dibyasom: faceWeights[1],
+      };
+      // const faceWeightsLabeled = {
+      //   "Dibyasom"
+      // }
+      const labeledFaceDescriptors = await Promise.all(
+        labels.map(async (label) => {
+          return faceapi.LabeledFaceDescriptors.fromJSON(
+            labeledFaceWeights[label]
+          );
+        })
+      );
 
-        /* Create and save labeleDescriptors.*****************************************/
-        // const faceDescriptor = createDesc([imgDesc.descriptor]);
-        // if (faceDescriptor) {
-        //   fs.writeFileSync(
-        //     `./data/${Math.random().toString(36).substring(2, 7)}.json`,
-        //     JSON.stringify(faceDescriptor.toJSON())
-        //   );
-        // }
+      const faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors, 0.6);
 
-        /* Loads and parse the face weights ******************************************/
-        const labels = ["JackSparrow", "Dibyasom"];
-        const labeledFaceWeights = {
-          JackSparrow: faceWeights[0],
-          Dibyasom: faceWeights[1],
-        };
-        // const faceWeightsLabeled = {
-        //   "Dibyasom"
-        // }
-        const labeledFaceDescriptors = await Promise.all(
-          labels.map(async (label) => {
-            return faceapi.LabeledFaceDescriptors.fromJSON(
-              labeledFaceWeights[label]
-            );
-          })
-        );
+      // Run face match.
+      const bestMatch = faceMatcher.findBestMatch(imgDesc.descriptor);
+      console.log(bestMatch);
+      console.log("Writing to socket @faceStat-event.");
+      socket.emit("faceStat", bestMatch.toString());
 
-        const faceMatcher = new faceapi.FaceMatcher(
-          labeledFaceDescriptors,
-          0.6
-        );
+      // Bounding Boxes etch.
+      // const ROI = frameDispFlip.getRegion(new cv.Rect(x, y, width, height));
+      // cv.imwrite("./data/Dibyasom/", region);
 
-        // Run face match.
-        const bestMatch = faceMatcher.findBestMatch(imgDesc.descriptor);
-        console.log(bestMatch);
-        console.log("Writing to socket @faceStat-event.");
-        io.emit("faceStat", bestMatch.toString());
+      /* For debugging and shitttttttttttt  ************************************/
+      // console.log("Face Detected, Co-ordinates ~");
+      // console.log(imgDesc.alignedRect);
+      // console.log(process.argv.length);
 
-        // Bounding Boxes etch.
-        // const ROI = frameDispFlip.getRegion(new cv.Rect(x, y, width, height));
-        // cv.imwrite("./data/Dibyasom/", region);
+      /* Dibya bsdk assignment kr. */
+    } else {
+      socket.emit("faceStat", "No face detected");
+    }
 
-        /* For debugging and shitttttttttttt  ************************************/
-        // console.log("Face Detected, Co-ordinates ~");
-        // console.log(imgDesc.alignedRect);
-        // console.log(process.argv.length);
+    const frameJpeg = cv.imencode(".jpeg", frameDispFlip).toString("base64");
+    socket.emit("jediStream", frameJpeg);
+  }, 1000 / FPS);
 
-        /* Dibya bsdk assignment kr. */
-      } else {
-        io.emit("faceStat", "No face detected");
-      }
-
-      const frameJpeg = cv.imencode(".jpeg", frameDispFlip).toString("base64");
-      io.emit("jediStream", frameJpeg);
-    }, 1000 / FPS);
-
-    // GESTURE RECOGNITION ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~`
-  });
+  // GESTURE RECOGNITION ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~`
 }
 
-initBlackboard();
 /*
   alignedRect: M {
     _imageDims: A { _width: 352, _height: 288 },
