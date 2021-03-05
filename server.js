@@ -3,6 +3,9 @@ const path = require("path");
 const express = require("express");
 const process = require("process");
 const fs = require("file-system");
+
+const cors = require("cors");
+
 // Face-API
 const tf = require("@tensorflow/tfjs-node");
 const faceapi = require("@vladmandic/face-api");
@@ -14,7 +17,12 @@ const faceRecogModels = "./models/";
 // Create an instance of express (Start the server)
 const app = express();
 const server = require("http").Server(app);
-const io = require("socket.io")(server);
+const io = require("socket.io")(server, {
+  cors: {
+    origin: "*",
+  },
+});
+app.use(cors());
 app.use(express.json()); // Enables to accept JSON requests.
 app.use("/", express.static(path.join(__dirname, "public"))); // Exposed to public.
 app.set("view engine", "ejs");
@@ -126,7 +134,9 @@ app.get("/", (req, res) => {
 io.on("connection", async (socket) => {
   //Initialize.
   try {
-    await initBlackboard(socket);
+    socket.on("connected", async () => {
+      await initBlackboard(socket);
+    });
   } catch (err) {
     console.error(err);
   }
