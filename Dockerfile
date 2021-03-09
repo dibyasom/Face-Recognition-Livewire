@@ -1,5 +1,5 @@
 #Build stage.
-FROM ubuntu:20.04
+FROM node:latest
 
 WORKDIR /build
 
