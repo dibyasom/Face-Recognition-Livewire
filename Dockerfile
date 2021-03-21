@@ -1,17 +1,13 @@
 #Build stage.
-FROM ubuntu:20.04
+FROM node:15.11.0-stretch
 
 WORKDIR /build
 
-RUN apt-get -y update
-
-RUN apt-get -y install git
-
-RUN npm install opencv-build opencv4nodejs
-
-RUN npm ci
+# RUN npm install opencv-build opencv4nodejs
 
 COPY package.json package-lock.json ./
+
+RUN npm ci
 
 COPY . .
 

@@ -54,6 +54,7 @@ const analyse = async (tensor) => {
 };
 
 const loadFaceWeights = async () => {
+  // Loads trained face features from fileStructure, and parses into json.
   try {
     let faceWeights = [];
     console.log("Reading");
@@ -74,20 +75,8 @@ const loadFaceWeights = async () => {
             fs.readFileSync(path.join(faceWeightsPath, `${faceDir.name}`))
           )
         );
-      /*faceWeights.append(JSON.parse(faceDir))*/
-      // If the readSync() returns null
-      // stop the loop
       else filesLeft = false;
     }
-    // await fs.readdirSync(faceWeightsPath, (err, files) => {
-    //   if (err) {
-    //     return console.log("Unable to scan director", faceWeightsPath);
-    //   }
-    //   console.log(files);
-    //   files.forEach((file) => {
-    //     faceWeights.append(file.name);
-    //   });
-    // });
     return faceWeights;
   } catch (err) {
     console.log(err);
@@ -95,7 +84,7 @@ const loadFaceWeights = async () => {
 };
 
 const createDesc = (faceDescriptor) => {
-  return new faceapi.LabeledFaceDescriptors("jack Sparrow", faceDescriptor);
+  return new faceapi.LabeledFaceDescriptors("Rashmi Ma'am", faceDescriptor);
 };
 
 //Load models from disk.
@@ -127,22 +116,28 @@ try {
   console.log(err);
 }
 
-app.get("/", (req, res) => {
+app.get("/", async (req, res) => {
   res.render("bb");
-});
+  io.on("connection", (socket) => {
+    engageRecog(socket);
+    console.log("New user Connected!");
 
-io.on("connection", async (socket) => {
-  //Initialize.
-  try {
-    socket.on("connected", async () => {
-      await initBlackboard(socket);
+    socket.on("disconnect", () => {
+      console.log("User disconnected!");
     });
-  } catch (err) {
-    console.error(err);
-  }
+  });
+
+  //Initialize.
+  // try {
+  //   await engageRecog(socket);
+  // } catch (err) {
+  //   console.error(err);
+  // }
 });
 
-async function initBlackboard(socket) {
+async function engageRecog(socket) {
+  //Monitor face-data
+  var faceData = { faceStat: null, jediStream: null };
   // Loading prev trained weights, if any.
   const faceWeights = await loadFaceWeights();
   console.log("Face weights Loaded");
@@ -152,8 +147,10 @@ async function initBlackboard(socket) {
       faceapi.version.faceapi
     } Backend: ${faceapi.tf?.getBackend()}`
   );
+
+  console.log("ACM's Cloud-Based Facial Recog cognitive API is live ->");
   // OpenCV way to access camStream from front-end.
-  const FPS = 1;
+  const FPS = 30;
   const vCap = new cv.VideoCapture(0);
   vCap.set(cv.CAP_PROP_FRAME_WIDTH, 320);
   vCap.set(cv.CAP_PROP_FRAME_HEIGHT, 480);
@@ -194,14 +191,38 @@ async function initBlackboard(socket) {
       // }
 
       /* Loads and parse the face weights ******************************************/
-      const labels = ["JackSparrow", "Dibyasom"];
+
+      const labels = [
+        "Dibyasom",
+        "PankajSir",
+        "DeepakSir",
+        "AnujSir",
+        "AmarSir",
+        "AvitaMaam",
+        "LalitSir",
+        "NeeluMaam",
+        "PraveenSir",
+        "RashmiMaam",
+        "RaviSir",
+        "AmarendraSir",
+        "xR",
+      ];
       const labeledFaceWeights = {
-        JackSparrow: faceWeights[0],
-        Dibyasom: faceWeights[1],
+        Dibyasom: faceWeights[4],
+        PankajSir: faceWeights[7],
+        DeepakSir: faceWeights[3],
+        AnujSir: faceWeights[1],
+        AmarSir: faceWeights[0],
+        AvitaMaam: faceWeights[2],
+        LalitSir: faceWeights[5],
+        NeeluMaam: faceWeights[6],
+        PraveenSir: faceWeights[8],
+        RashmiMaam: faceWeights[9],
+        RaviSir: faceWeights[10],
+        AmarendraSir: faceWeights[11],
+        xR: faceWeights[12],
       };
-      // const faceWeightsLabeled = {
-      //   "Dibyasom"
-      // }
+
       const labeledFaceDescriptors = await Promise.all(
         labels.map(async (label) => {
           return faceapi.LabeledFaceDescriptors.fromJSON(
@@ -210,35 +231,35 @@ async function initBlackboard(socket) {
         })
       );
 
-      const faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors, 0.6);
+      const faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors, 0.5);
 
       // Run face match.
       const bestMatch = faceMatcher.findBestMatch(imgDesc.descriptor);
-      console.log(bestMatch);
       console.log("Writing to socket @faceStat-event.");
-      socket.emit("faceStat", bestMatch.toString());
+      socket.emit(("faceStat", "Hello"));
+      // socket.emit(("faceStat", bestMatch.toString()));
+      console.log(bestMatch);
+      faceData.faceStat = bestMatch.toString();
+      //Append detected face-coordinates, ****Testing purpose, cus target user is blind anyway.
+      const frameJpegEncoded = cv
+        .imencode(".jpeg", frameDispFlip)
+        .toString("base64");
+      faceData.jediStream = frameJpegEncoded;
 
-      // Bounding Boxes etch.
-      // const ROI = frameDispFlip.getRegion(new cv.Rect(x, y, width, height));
-      // cv.imwrite("./data/Dibyasom/", region);
-
-      /* For debugging and shitttttttttttt  ************************************/
-      // console.log("Face Detected, Co-ordinates ~");
-      // console.log(imgDesc.alignedRect);
-      // console.log(process.argv.length);
-
-      /* Dibya bsdk assignment kr. */
+      /* ***** Dibya daddy assignment karo. ***** */
     } else {
-      socket.emit("faceStat", "No face detected");
+      faceData.faceStat = "No face detected!";
     }
 
-    const frameJpeg = cv.imencode(".jpeg", frameDispFlip).toString("base64");
-    socket.emit("jediStream", frameJpeg);
+    socket.emit("jediStream", faceData.jediStream);
+    socket.emit("faceStat", faceData.faceStat);
   }, 1000 / FPS);
-
+  //
+  // socket.emit("hello", "ssup?");
   // GESTURE RECOGNITION ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~`
 }
 
+// Aligned rect return format.
 /*
   alignedRect: M {
     _imageDims: A { _width: 352, _height: 288 },
